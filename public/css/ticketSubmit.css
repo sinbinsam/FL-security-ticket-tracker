@@ -1,3 +1,33 @@
 .salsa-calendar-input {
     width: 20%;
 }
+
+.header {
+    margin: auto;
+    text-align: center;
+    margin-top: 2rem;
+    margin-bottom: 2rem;
+}
+
+.form {
+    width: 80%
+}
+
+.short-input {
+    width: 250px;
+}
+
+.long-input {
+    width: 500px;
+}
+
+.container {
+    text-align: center;
+}
+
+.centered {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+

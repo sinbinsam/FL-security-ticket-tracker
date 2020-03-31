@@ -1,5 +1,5 @@
 const   express     =   require('express'),
-        moment      =   require('axios'),
+        moment      =   require('moment'),
         bodyParser  =   require('body-parser'),
         axios       =   require('axios'),
         app         =   express(),
@@ -7,11 +7,44 @@ const   express     =   require('express'),
         ObjectId    =   require('mongodb').ObjectID;
         creds       =   require('./creds.json'),
         client      =   require('twilio')(creds.accountSid, creds.authToken),
+        sgMail      =   require('@sendgrid/mail'),
         port        =   process.env.PORT || 9090;
+
+
+moment.suppressDeprecationWarnings = true;
+sgMail.setApiKey(creds.sendGridApi);
 
 app.use(bodyParser.json()); // support json encoded bodies
 app.use(bodyParser.urlencoded({ extended: true })); // support encoded bodies
 app.use(express.static(__dirname + '/public')); //stylesheets and js
+
+
+app.get('/', (req, res) => {
+    res.sendFile(__dirname + '/views/ticketSubmit.html')
+})
+
+app.get('/success', (req, res) => {
+    res.sendFile(__dirname + '/views/success.html')
+})
+
+app.get('/fail', (req, res) => {
+    res.send('internal server failure')
+})
+
+app.post('/ticket', (req, res) => {
+    let data = req.body
+    
+        insertTicket(data, function(status) {
+            if (status == 'fucked') {
+                res.status(500).end()
+            } else if (status == 'good') {
+                res.status(200).end()
+            }
+        })
+        
+    
+})
+
 
 app.use(function(req, res, next) {
     res.header("Access-Control-Allow-Origin", "*");
@@ -19,7 +52,12 @@ app.use(function(req, res, next) {
     next();
   });
 
-app.get('/api/tickets', (req, res) => {
+app.get('/api/tickets/:type', (req, res) => {
+let resolve = {resolved: false}
+    if (req.params.type == 'resolved') {
+        resolve.resolved = true
+    }
+
     mongo.connect(creds.mongoUrl, {
         useNewUrlParser: true,
         useUnifiedTopology: true
@@ -32,15 +70,16 @@ app.get('/api/tickets', (req, res) => {
       var   db              = client.db('Security'),
             collection      = db.collection('Tickets');
 
-        collection.find({}).toArray((err, docs) => {
+        collection.find(resolve).sort({ $natural: -1 }).limit(200).toArray((err, docs) => { //Limit is X number of most recent tickets it will send to client
             res.json(docs)
         })
     });
 });
 
 app.post('/api/assignTicket', (req, res) => { //takes two parameters, id and assignee
-    let assignee = req.body.assignee
-    let id = new ObjectId(req.body.id);
+    let assigneeObj = req.body.assignee
+    let assignee = req.body.assignee.name
+    let id = new ObjectId(req.body.ticketId);
     mongo.connect(creds.mongoUrl, {
         useNewUrlParser: true,
         useUnifiedTopology: true
@@ -53,10 +92,52 @@ app.post('/api/assignTicket', (req, res) => { //takes two parameters, id and ass
       var   db              = client.db('Security'),
             collection      = db.collection('Tickets');
 
+      collection.findOne({_id: id}, (err, result) => {
+          if (err) {
+              console.log('there was an error finding the ticket')
+          } else if (!err) {
+            const lineBreak = '\n'
+            let msg = 'Requester: ' + result.name + lineBreak 
+            + 'date: ' + result.date + ', ' + result.time + lineBreak
+            + 'details: ' + result.details;
+            let subject = 'New escort ticket assigned to you, ID: ' + JSON.stringify(result._id).slice(21,24);
+                sendMail(assigneeObj.email, msg, subject)
+            if (result.email !== '' && result.assigned == false) {
+            let msg = 'Security escort ticket: ' + lineBreak 
+            + 'date: ' + result.date + ', ' + result.time + lineBreak
+            + 'details: ' + result.details + lineBreak
+            + 'Your security escort will be handled by ' + assignee;
+            let subject = assignee + ' will be your security escort for ticket ID: ' + JSON.stringify(result._id).slice(21,24);
+                sendMail(result.email, msg, subject)
+            } else if (result.email !== '' && result.assigned == true) {
+
+                    let msg = 'Security escort ticket update:' + lineBreak 
+                        + 'date: ' + result.date + ', ' + result.time + lineBreak
+                        + 'details: ' + result.details + lineBreak
+                        + 'has been re-assigned to ' + assignee;
+                            let subject = 'Your security escort ticket ID: ' + JSON.stringify(result._id).slice(21,24); + 'has been re-assigned';
+                                sendMail(result.email, msg, subject)
+
+                    let msg2 = 'Security escort ticket update:' + lineBreak 
+                        + 'date: ' + result.date + ', ' + result.time + lineBreak
+                        + 'details: ' + result.details + lineBreak
+                        + 'has been re-assigned to ' + assignee + lineBreak 
+                        + 'You are no longer responsible for this ticket';
+                            let subject2 = 'Your ticket ID: ' + JSON.stringify(result._id).slice(21,24); + 'has been re-assigned';
+                                sendMail(result.assignEmail, msg2, subject2)                    
+                
+
+
+
+            }
+          }
+      })
+
         collection.updateMany({_id: id}, 
             {'$set': {
                 assigned: true,
-                assignee: assignee
+                assignee: assignee,
+                assignEmail: assigneeObj.email
             }}, 
             (err, result) => {
                 if (err) {
@@ -69,7 +150,6 @@ app.post('/api/assignTicket', (req, res) => { //takes two parameters, id and ass
 });
 
 app.post('/api/resolveTicket', (req, res) => { //takes two parameters, id and resolver
-    let resolver = req.body.resolver
     let id = new ObjectId(req.body.id);
     mongo.connect(creds.mongoUrl, {
         useNewUrlParser: true,
@@ -86,7 +166,7 @@ app.post('/api/resolveTicket', (req, res) => { //takes two parameters, id and re
         collection.updateMany({_id: id}, 
             {'$set': {
                 resolved: true,
-                resolver: resolver
+                resolveTime: moment().format('M/D/YY h:m a')
             }}, 
             (err, result) => {
                 if (err) {
@@ -98,40 +178,41 @@ app.post('/api/resolveTicket', (req, res) => { //takes two parameters, id and re
     });
 });
 
-app.get('/', (req, res) => {
-    res.sendFile(__dirname + '/views/ticketSubmit.html')
-})
+app.get('/api/escorts', (req, res) => {
+    mongo.connect(creds.mongoUrl, {
+        useNewUrlParser: true,
+        useUnifiedTopology: true
+      }, (err, client) => {
+      if (err) {
+        console.error(err)
+        return
+      }
 
-app.get('/success', (req, res) => {
-    res.send('sucess')
-})
+      var   db              = client.db('Security'),
+            collection      = db.collection('Conf');
+      collection.find({}).toArray((err, docs) => {
+          if (!docs || err) {
+              console.log(err)
+              collection.insert({'_id': 'escorts'}, (err, result) => {
+                if (err) {
+                    res.status(500).end()
+                } else {
+                    res.json(result)
+                }
+              })
+          } else {
+              res.json(docs)
+          }
 
-app.get('/fail', (req, res) => {
-    res.send('internal server failure')
-})
+      })
+    });
+});
 
-app.post('/ticket', (req, res) => {
-    let data = {
-        name: req.body.name,
-        date: req.body.date,
-        time: req.body.time,
-        details: req.body.details,
-        email: req.body.email
-    }
-    
-        insertTicket(data, function(status) {
-            if (status == 'fucked') {
-                res.status(500).end()
-            } else if (status == 'good') {
-                res.status(200).end()
-            }
-        })
-        
-    
-})
+
 
 function insertTicket(data, callback) {
-    sendText(data.details);
+    checkForSameDay(data)
+    //sendText(data.details);
     mongo.connect(creds.mongoUrl, {
         useNewUrlParser: true,
         useUnifiedTopology: true
@@ -144,6 +225,8 @@ function insertTicket(data, callback) {
       var   db              = client.db('Security'),
             collection      = db.collection('Tickets');
 
+
+            data.submitTime = moment().format('M/D/YY h:m a')
         collection.insertOne(data, (err, result) => {
             if (err) {
                 callback('fucked')
@@ -154,14 +237,36 @@ function insertTicket(data, callback) {
     });
 }
 
-function sendText(words, sendNumber) {
+function checkForSameDay (data) {
+    let bool = moment(data.date, 'MM-DD-YYYY').isSame(moment().format('MM-DD-YYYY'))
+    if (bool == true) {
+        let lineBreak = '\n'
+        let message = 'New ticket submitted by ' + data.name.slice(0,20) + lineBreak 
+        + 'When: ' + data.time + lineBreak
+        + 'Details: ' + data.details.slice(0, 80)
+
+        sendText(message)
+    }
+}
+
+function sendText(words) {
 client.messages
     .create({
      body: words,
      from: creds.number,
-     to: sendNumber
+     to: creds.sendNumber
    })
-  .then(message => console.log(message.sid));
+  .catch(err => console.log(err));
+}
+
+function sendMail(email, textMsg, subject) {
+    const msg = {
+        to: email,
+        from: 'ticket@sinbins.am',
+        subject: subject,
+        text: textMsg
+      };
+      sgMail.send(msg);
 }
 
 

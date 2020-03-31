@@ -1,0 +1,17 @@
+.container {
+    text-align: center;
+}
+
+#title {
+    padding-top: 10rem;
+}
+
+#submit {
+    margin-top: 2rem;
+    padding-left: 50px;
+    padding-right: 50px;
+}
+
+#subtitle {
+    padding-top: 2rem;
+}

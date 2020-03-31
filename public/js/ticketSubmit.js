@@ -9,7 +9,7 @@ var calendar_from = new SalsaCalendar({
   connectCalendar: false
 });
 
-function ValidateEmail(mail) 
+function validateEmail(mail) 
 {
  if (/^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/.test(mail.value))
   {
@@ -40,9 +40,9 @@ submit.addEventListener('click', function() {
 
       if (name.value.length <= 0 || time.value == 'undefined' || !time.value || time.value.length <= 0 || details.value.length <= 0) {
         console.log('not complete') //handle not complete form
-      } else if (ValidateEmail(email) == false) {
-
-      } else {
+      } else if (email.value == '') {
+        submitForm(name, date, time, details, email)
+      } else if (validateEmail(email) == true) {
         submitForm(name, date, time, details, email)
       }
 })
@@ -53,7 +53,14 @@ async function submitForm(name, date, time, details, email) {
     date: date.value,
     time: time.value,
     details: details.value,
-    email: email.value
+    email: email.value,
+    assigned: false,
+    assignee: '',
+    assignEmail: '',
+    resolved: false,
+    resolver: '',
+    resolveTime: '',
+    submitTime: ''
   })
   .then(function (response) {
     if (response.status == 200) {

@@ -17,10 +17,14 @@ sgMail.setApiKey(creds.sendGridApi);
 app.use(bodyParser.json()); // support json encoded bodies
 app.use(bodyParser.urlencoded({ extended: true })); // support encoded bodies
 app.use(express.static(__dirname + '/public')); //stylesheets and js
-
+app.use(express.static('/public/dist'));
 
 app.get('/', (req, res) => {
     res.sendFile(__dirname + '/views/ticketSubmit.html')
+})
+
+app.get('/manage/tickets', (req, res) => {
+    res.sendFile(__dirname + '/views/dist/index.html')
 })
 
 app.get('/success', (req, res) => {
@@ -96,6 +100,8 @@ app.post('/api/assignTicket', (req, res) => { //takes two parameters, id and ass
           if (err) {
               console.log('there was an error finding the ticket')
           } else if (!err) {
+
+            if (assigneeObj.name !== result.assignee && assigneeObj.email !== result.assignEmail) {
             const lineBreak = '\n'
             let msg = 'Requester: ' + result.name + lineBreak 
             + 'date: ' + result.date + ', ' + result.time + lineBreak
@@ -131,6 +137,7 @@ app.post('/api/assignTicket', (req, res) => { //takes two parameters, id and ass
 
             }
           }
+        }
       })
 
         collection.updateMany({_id: id}, 
